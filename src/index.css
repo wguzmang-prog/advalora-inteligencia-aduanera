@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Space Grotesk", sans-serif;
+  --font-sans: "Manrope", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-midnight: #0B1F3A;
+  --color-midnight-light: #132B4F;
+  --color-midnight-surface: #18335E;
+  --color-turquoise: #00E5B0;
+  --color-turquoise-dark: #00B88C;
+  --color-turquoise-light: #E6FCF7;
+  --color-solar: #FFD600;
+  --color-solar-light: #FFFBE6;
+  --color-coral: #FF5A5F;
+  --color-coral-light: #FFEBEB;
+  --color-canvas: #F4F7FB;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-canvas);
+  color: var(--color-midnight);
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: var(--font-display);
+}
+
+.tabular-numbers {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbars for high-density data */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(11, 31, 58, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(11, 31, 58, 0.4);
+}
+
+/* Stamp effect for validated customs seal */
+.stamp-seal {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed #00E5B0;
+  transform: rotate(-3deg);
+  letter-spacing: 0.08em;
+}

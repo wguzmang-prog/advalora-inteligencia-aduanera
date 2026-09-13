@@ -1,0 +1,6 @@
+{
+  "name": "Advalora - Inteligencia Aduanera & Pre-Declaración SUNAT",
+  "description": "Plataforma inteligente de consistencia documental y clasificación arancelaria NANDINA para liquidadores y agencias de aduana en Perú.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
