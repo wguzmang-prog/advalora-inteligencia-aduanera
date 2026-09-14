@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   UploadCloud, 
   FileText, 
@@ -12,7 +12,9 @@ import {
   RefreshCw, 
   Eye, 
   ShieldCheck,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Check,
+  Plus
 } from 'lucide-react';
 import { ScreenId, DocumentScan } from '../../types';
 import { MOCK_DOCUMENTS, CURRENT_OPERATION } from '../../data/mockData';
@@ -38,6 +40,12 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
   const [referenceNumber, setReferenceNumber] = useState<string>('ADV-2024-0892');
   const [cifUsd, setCifUsd] = useState<number>(153550);
   
+  // Document state and file handling
+  const [documents, setDocuments] = useState<DocumentScan[]>(MOCK_DOCUMENTS);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(100);
   const [currentStepNote, setCurrentStepNote] = useState<string>('5 documentos procesados con éxito por el modelo de IA');
@@ -46,6 +54,119 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
   const [isSavingSupabase, setIsSavingSupabase] = useState<boolean>(false);
   const [supabaseSyncResult, setSupabaseSyncResult] = useState<{ saved: boolean; mode: 'supabase' | 'local'; message: string } | null>(null);
   const { isConfigured: hasSupabaseConfig, source: supabaseSource } = getSupabaseCredentials();
+
+  // Helper to detect document type by filename
+  const detectDocumentType = (fileName: string): DocumentScan['type'] => {
+    const lower = fileName.toLowerCase();
+    if (lower.includes('packing') || lower.includes('lista') || lower.includes('empaque') || lower.includes('pl')) {
+      return 'Packing List';
+    }
+    if (lower.includes('bl') || lower.includes('bill') || lower.includes('lading') || lower.includes('awb') || lower.includes('guia') || lower.includes('embarque')) {
+      return 'Bill of Lading / AWB';
+    }
+    if (lower.includes('origen') || lower.includes('origin') || lower.includes('tlc') || lower.includes('cert')) {
+      return 'Certificado de Origen';
+    }
+    if (lower.includes('swift') || lower.includes('banco') || lower.includes('pago') || lower.includes('transfer') || lower.includes('wire')) {
+      return 'Swift Bancario';
+    }
+    return 'Factura Comercial';
+  };
+
+  // Format file size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Process selected or dropped files
+  const processUploadedFiles = (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
+
+    const newDocs: DocumentScan[] = fileArray.map((file, index) => {
+      const docType = detectDocumentType(file.name);
+      return {
+        id: `doc-uploaded-${Date.now()}-${index}`,
+        name: file.name.replace(/\.[^/.]+$/, ''),
+        type: docType,
+        fileName: file.name,
+        fileSize: formatFileSize(file.size),
+        pages: Math.floor(Math.random() * 3) + 1,
+        status: 'validado',
+        confidence: Math.floor(Math.random() * 5) + 95, // 95 - 99%
+        extractedFieldsCount: Math.floor(Math.random() * 12) + 16,
+        matchedFieldsCount: Math.floor(Math.random() * 10) + 14,
+        mismatchCount: 0,
+        uploadDate: new Date().toLocaleDateString('es-PE')
+      };
+    });
+
+    setDocuments(prev => [...newDocs, ...prev]);
+    setUploadFeedback(`¡${newDocs.length} documento(s) adjuntado(s) exitosamente! Iniciando lectura OCR...`);
+
+    // Run OCR analysis on the newly added documents
+    setIsProcessing(true);
+    setProgress(15);
+    setCurrentStepNote(`Iniciando OCR y reconocimiento de texto en ${newDocs.length} nuevo(s) documento(s)...`);
+
+    setTimeout(() => {
+      setProgress(50);
+      setCurrentStepNote(`Extrayendo entidades aduaneras de ${newDocs.map(d => d.fileName).join(', ')}...`);
+    }, 700);
+
+    setTimeout(() => {
+      setProgress(85);
+      setCurrentStepNote('Cotejando campos con la normativa SUNAT y consistencia de valores...');
+    }, 1400);
+
+    setTimeout(() => {
+      setProgress(100);
+      setIsProcessing(false);
+      setCurrentStepNote(`Lectura completada. ${newDocs.length + documents.length} documentos indexados en el expediente.`);
+      setTimeout(() => setUploadFeedback(null), 4000);
+    }, 2000);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processUploadedFiles(e.target.files);
+      // Reset input value so same files can be chosen again if needed
+      e.target.value = '';
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      processUploadedFiles(e.dataTransfer.files);
+    }
+  };
+
+  const handleRemoveDocument = (docId: string) => {
+    setDocuments(prev => prev.filter(d => d.id !== docId));
+  };
 
   const handleSaveToSupabase = async (proceedNext: boolean = false) => {
     setIsSavingSupabase(true);
@@ -67,7 +188,7 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
       importer_name: importerName,
       incoterm: incoterm,
       cif_usd: cifUsd,
-      documents_count: MOCK_DOCUMENTS.length,
+      documents_count: documents.length,
       critical_issues_count: 2,
       status: 'En Observación',
       metadata: {
@@ -110,7 +231,7 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
   const simulateOcrReading = () => {
     setIsProcessing(true);
     setProgress(15);
-    setCurrentStepNote('Iniciando OCR y reconocimiento de texto en 5 documentos...');
+    setCurrentStepNote(`Iniciando OCR y reconocimiento de texto en ${documents.length} documentos...`);
 
     setTimeout(() => {
       setProgress(45);
@@ -383,16 +504,54 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
             </button>
           </div>
 
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            id="file-upload-input"
+            type="file"
+            multiple
+            accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+
           {/* Drag and Drop Zone */}
-          <div className="border-2 border-dashed border-[#00E5B0]/60 bg-[#00E5B0]/5 hover:bg-[#00E5B0]/10 rounded-2xl p-6 text-center transition-all cursor-pointer">
-            <UploadCloud className="w-10 h-10 text-[#00E5B0] mx-auto mb-2" />
+          <div 
+            id="document-dropzone"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer select-none ${
+              isDragging 
+                ? 'border-[#00E5B0] bg-[#00E5B0]/20 scale-[1.01] shadow-lg shadow-[#00E5B0]/10 ring-2 ring-[#00E5B0]/50'
+                : 'border-[#00E5B0]/60 bg-[#00E5B0]/5 hover:bg-[#00E5B0]/10 hover:border-[#00E5B0]'
+            }`}
+          >
+            <UploadCloud className={`w-10 h-10 text-[#00E5B0] mx-auto mb-2 transition-transform duration-200 ${isDragging ? 'scale-125 animate-bounce' : ''}`} />
             <div className={`text-sm font-bold font-heading ${textPrimary}`}>
-              Arrastra tus documentos aquí o haz clic para examinar
+              {isDragging ? '¡Suelta tus archivos aquí para procesar!' : 'Arrastra tus documentos aquí o haz clic para examinar'}
             </div>
             <p className={`text-xs ${textMuted} mt-1 max-w-md mx-auto`}>
               Soporta: Factura Comercial, Packing List, Bill of Lading / AWB, Certificado de Origen (TLC) y Swift Bancario en formato PDF.
             </p>
+            <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] border border-[#00E5B0]/30 hover:bg-[#00E5B0]/30 transition-colors">
+              <Plus className="w-3.5 h-3.5" />
+              <span>Examinar Archivos en tu Computadora</span>
+            </div>
           </div>
+
+          {/* Upload Feedback Toast */}
+          {uploadFeedback && (
+            <div className="p-3 rounded-xl bg-[#E6FCF7] dark:bg-[#00E5B0]/15 border border-[#00E5B0] text-[#008F6B] dark:text-[#00E5B0] flex items-center justify-between text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{uploadFeedback}</span>
+              </div>
+              <button onClick={() => setUploadFeedback(null)} className="underline text-[10px]">Cerrar</button>
+            </div>
+          )}
 
           {/* AI Processing Progress Bar */}
           <div className="space-y-2">
@@ -419,14 +578,14 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
           {/* Detected Documents List */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between text-xs font-mono uppercase font-bold text-gray-400">
-              <span>Documentos Identificados ({MOCK_DOCUMENTS.length})</span>
+              <span>Documentos Identificados ({documents.length})</span>
               <span>Estado OCR</span>
             </div>
 
-            {MOCK_DOCUMENTS.map((doc) => (
+            {documents.map((doc) => (
               <div
                 key={doc.id}
-                className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${cardBg}`}
+                className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${cardBg} hover:border-[#00E5B0]/40 transition-colors group`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-[#00E5B0]/15 text-[#008F6B] flex items-center justify-center shrink-0">
@@ -466,6 +625,18 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
                       OK
                     </span>
                   )}
+
+                  <button
+                    type="button"
+                    title="Eliminar documento del expediente"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveDocument(doc.id);
+                    }}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
