@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   Search, 
@@ -16,11 +16,13 @@ import {
   ArrowRight,
   TrendingUp,
   SlidersHorizontal,
-  ChevronDown
+  ChevronDown,
+  Database
 } from 'lucide-react';
 import { ScreenId, DeclarationOperation } from '../../types';
 import { MOCK_OPERATIONS } from '../../data/mockData';
 import { SeverityBadge, SunatChannelPill } from '../common/CustomsDecorations';
+import { getCustomsOperationsFromSupabase, getSupabaseCredentials } from '../../lib/supabase';
 
 interface Screen2Props {
   onNavigate: (screen: ScreenId, operationId?: string) => void;
@@ -31,13 +33,63 @@ export const Screen2Dashboard: React.FC<Screen2Props> = ({ onNavigate, darkMode 
   const [activeFilter, setActiveFilter] = useState<'Todos' | 'Observada' | 'Validada' | 'En revisión' | 'Borrador'>('Todos');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [customsFilter, setCustomsFilter] = useState<string>('all');
+  const [allOperations, setAllOperations] = useState<DeclarationOperation[]>(MOCK_OPERATIONS);
+  const [dataSource, setDataSource] = useState<'supabase' | 'local'>('local');
+  const { isConfigured: isSupabaseConnected } = getSupabaseCredentials();
+
+  useEffect(() => {
+    async function loadOperations() {
+      const res = await getCustomsOperationsFromSupabase();
+      if (res.data && res.data.length > 0) {
+        setDataSource(res.source);
+        // Map any newly inserted Supabase operations into DeclarationOperation format
+        const converted: DeclarationOperation[] = res.data.map((dbOp) => ({
+          id: dbOp.id || dbOp.reference_number,
+          referenceNumber: dbOp.reference_number,
+          customsCode: `${dbOp.customs_code} - ${dbOp.customs_name}`,
+          regime: `${dbOp.regime} - Importación para el Consumo`,
+          importerRuc: dbOp.importer_ruc,
+          importerName: dbOp.importer_name,
+          supplierName: dbOp.metadata?.supplierName || 'Global Logistics Co. Ltd.',
+          supplierCountry: dbOp.metadata?.supplierCountry || 'China',
+          transportMode: (dbOp.transport_mode === 'Aéreo' ? 'Aéreo' : 'Marítimo'),
+          vesselOrFlight: dbOp.metadata?.vessel || 'CMA CGM CALLAO V.049W',
+          billOfLading: dbOp.metadata?.bl || 'BL-' + dbOp.reference_number,
+          incoterm: (dbOp.incoterm as any) || 'CIF',
+          totalFobUsd: (dbOp.cif_usd || 100000) * 0.88,
+          freightUsd: (dbOp.cif_usd || 100000) * 0.10,
+          insuranceUsd: (dbOp.cif_usd || 100000) * 0.02,
+          totalCifUsd: dbOp.cif_usd || 0,
+          status: dbOp.status === 'Auditado' ? 'Validada' : dbOp.status === 'En Observación' ? 'Observada' : (dbOp.status as any) || 'Borrador',
+          projectedChannel: (dbOp.critical_issues_count || 0) > 0 ? 'Rojo' : 'Verde',
+          projectedRiskScore: (dbOp.critical_issues_count || 0) > 0 ? 84 : 12,
+          documentsCount: dbOp.documents_count || 5,
+          criticalIssuesCount: dbOp.critical_issues_count || 0,
+          warningIssuesCount: 1,
+          createdAt: dbOp.created_at || new Date().toISOString(),
+          lastUpdated: dbOp.created_at || 'Hace instantes',
+          liquidator: {
+            name: dbOp.metadata?.last_updated_by || 'Carlos Mendoza',
+            role: 'Liquidador Aduanero Callao',
+            avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120&auto=format&fit=crop&q=80'
+          }
+        }));
+
+        // Combine with existing mock operations avoiding duplicate referenceNumbers
+        const existingRefs = new Set(converted.map(c => c.referenceNumber));
+        const nonDuplicateMock = MOCK_OPERATIONS.filter(m => !existingRefs.has(m.referenceNumber));
+        setAllOperations([...converted, ...nonDuplicateMock]);
+      }
+    }
+    loadOperations();
+  }, []);
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
   const textPrimary = darkMode ? 'text-white' : 'text-[#0B1F3A]';
   const textMuted = darkMode ? 'text-white/60' : 'text-[#0B1F3A]/60';
 
-  const filteredOperations = MOCK_OPERATIONS.filter(op => {
+  const filteredOperations = allOperations.filter(op => {
     const matchesFilter = activeFilter === 'Todos' || op.status === activeFilter;
     const matchesSearch = 
       op.referenceNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -53,11 +105,17 @@ export const Screen2Dashboard: React.FC<Screen2Props> = ({ onNavigate, darkMode 
       {/* Top Header with Breadcrumb & CTA */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#00E5B0]/20 text-[#008F6B] border border-[#00E5B0]/40">
               PANTALLA 2 DE 9
             </span>
-            <h1 className={`text-2xl sm:text-3xl font-bold font-heading ${textPrimary}`}>
+            {isSupabaseConnected && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#E6FCF7] text-[#008F6B] border border-[#00E5B0]/40">
+                <Database className="w-3 h-3" />
+                <span>Supabase Live DB</span>
+              </span>
+            )}
+            <h1 className={`text-2xl sm:text-3xl font-bold font-heading w-full ${textPrimary} mt-1`}>
               Mis Operaciones Aduaneras
             </h1>
           </div>

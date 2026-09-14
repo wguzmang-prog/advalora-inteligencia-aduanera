@@ -261,6 +261,72 @@ export async function saveClassificationToSupabase(record: DbClassificationRecor
 }
 
 /**
+ * 4. Fetches Customs Operations from Supabase (or fallback to local)
+ */
+export async function getCustomsOperationsFromSupabase(): Promise<{ data: DbCustomsOperation[]; source: 'supabase' | 'local' }> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('customs_operations')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        return { data, source: 'supabase' };
+      }
+    } catch (e) {
+      console.warn('Could not fetch from Supabase:', e);
+    }
+  }
+
+  // Fallback to local
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('advalora_local_operations');
+      if (stored) {
+        return { data: JSON.parse(stored), source: 'local' };
+      }
+    } catch (e) {}
+  }
+
+  return { data: [], source: 'local' };
+}
+
+/**
+ * 5. Fetches Team Members from Supabase (or fallback to local)
+ */
+export async function getTeamMembersFromSupabase(): Promise<{ data: DbTeamMember[]; source: 'supabase' | 'local' }> {
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('team_members')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && data && data.length > 0) {
+        return { data, source: 'supabase' };
+      }
+    } catch (e) {
+      console.warn('Could not fetch team from Supabase:', e);
+    }
+  }
+
+  // Fallback to local
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('advalora_local_team');
+      if (stored) {
+        return { data: JSON.parse(stored), source: 'local' };
+      }
+    } catch (e) {}
+  }
+
+  return { data: [], source: 'local' };
+}
+
+/**
  * Helper to persist items safely in LocalStorage
  */
 function saveToLocalStorageList(key: string, item: any) {

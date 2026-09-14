@@ -25,6 +25,7 @@ import {
   setSupabaseCredentials, 
   clearSupabaseCredentials, 
   saveTeamMemberToSupabase,
+  getTeamMembersFromSupabase,
   SUPABASE_SQL_SCHEMA,
   DbTeamMember 
 } from '../../lib/supabase';
@@ -52,6 +53,29 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
   const [customKey, setCustomKey] = useState<string>(creds.key);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState<boolean>(false);
+
+  useEffect(() => {
+    async function loadTeam() {
+      const res = await getTeamMembersFromSupabase();
+      if (res.data && res.data.length > 0) {
+        const mapped: TeamMember[] = res.data.map(m => ({
+          id: m.id || m.email,
+          name: m.name,
+          email: m.email,
+          role: m.role as any,
+          avatar: m.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+          status: (m.status as any) || 'Activo',
+          operationsCount: m.operations_count || 0,
+          lastActive: 'Sincronizado Supabase'
+        }));
+        // Merge with defaults avoiding duplicate emails
+        const emails = new Set(mapped.map(item => item.email));
+        const nonDup = MOCK_TEAM_MEMBERS.filter(item => !emails.has(item.email));
+        setMembers([...mapped, ...nonDup]);
+      }
+    }
+    loadTeam();
+  }, []);
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
