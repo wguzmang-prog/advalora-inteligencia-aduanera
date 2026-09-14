@@ -377,6 +377,21 @@ export const Screen1LoginOnboarding: React.FC<Screen1Props> = ({ onCompleteOnboa
         {/* Right Column: Fast Login / Auth Card (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
           <div className={`rounded-3xl p-6 md:p-7 border shadow-sm ${containerBg}`}>
+            {/* Gestión Global Perú Agency Branding Badge */}
+            <div className="flex items-center gap-3 p-3 rounded-2xl bg-[#0B1F3A]/5 dark:bg-white/5 border border-[#0B1F3A]/10 dark:border-white/10 mb-5">
+              <div className="w-11 h-11 rounded-xl bg-white p-1 border border-[#0B1F3A]/10 flex items-center justify-center shrink-0 shadow-sm">
+                <img src="/favicon.png" alt="Gestión Global Perú" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#0B1F3A] dark:text-white truncate">
+                  Gestión Global Perú
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-white/60 font-mono">
+                  Agencia Aduanera & Operador Logístico
+                </p>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Lock className="w-4 h-4 text-[#00E5B0]" />

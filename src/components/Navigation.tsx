@@ -65,11 +65,17 @@ export const Navigation: React.FC<NavigationProps> = ({
               onClick={() => onSelectScreen('dashboard')}
               className="flex items-center gap-2.5 group text-left focus:outline-none"
             >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00E5B0] to-[#00B88C] flex items-center justify-center shadow-md shadow-[#00E5B0]/20 group-hover:scale-105 transition-transform">
-                <div className="relative">
-                  <Anchor className="w-5 h-5 text-[#0B1F3A] stroke-[2.5]" />
-                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#FFD600] ring-2 ring-[#0B1F3A]" />
-                </div>
+              <div className="w-10 h-10 rounded-xl bg-white p-1 border border-white/20 flex items-center justify-center shadow-md shadow-black/20 group-hover:scale-105 transition-transform overflow-hidden">
+                <img 
+                  src="/favicon.png" 
+                  alt="Gestión Global Perú Logo" 
+                  className="w-full h-full object-contain" 
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    // Fallback if image fails to render
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -82,7 +88,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-white/60 font-sans leading-none hidden sm:block">
-                  Consistencia Documental & Partidas NANDINA
+                  Gestión Global Perú • Consistencia & NANDINA
                 </p>
               </div>
             </button>
