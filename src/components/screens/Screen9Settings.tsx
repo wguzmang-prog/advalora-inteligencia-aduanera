@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   CreditCard, 
@@ -11,10 +11,23 @@ import {
   Download, 
   Sparkles,
   Lock,
-  ArrowRight
+  ArrowRight,
+  Database,
+  Copy,
+  CheckCircle2,
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 import { ScreenId, TeamMember } from '../../types';
 import { MOCK_TEAM_MEMBERS } from '../../data/mockData';
+import { 
+  getSupabaseCredentials, 
+  setSupabaseCredentials, 
+  clearSupabaseCredentials, 
+  saveTeamMemberToSupabase,
+  SUPABASE_SQL_SCHEMA,
+  DbTeamMember 
+} from '../../lib/supabase';
 
 interface Screen9Props {
   onNavigate: (screen: ScreenId) => void;
@@ -22,7 +35,7 @@ interface Screen9Props {
 }
 
 export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }) => {
-  const [activeTab, setActiveTab] = useState<'equipo' | 'planes' | 'facturacion'>('equipo');
+  const [activeTab, setActiveTab] = useState<'equipo' | 'planes' | 'facturacion' | 'supabase'>('equipo');
   const [members, setMembers] = useState<TeamMember[]>(MOCK_TEAM_MEMBERS);
   const [selectedPlan, setSelectedPlan] = useState<string>('team');
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('yearly');
@@ -31,13 +44,21 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
   const [newEmail, setNewEmail] = useState<string>('');
   const [newName, setNewName] = useState<string>('');
   const [newRole, setNewRole] = useState<string>('Liquidador Senior');
+  const [memberSaveStatus, setMemberSaveStatus] = useState<string | null>(null);
+
+  // Supabase Configuration Form state
+  const creds = getSupabaseCredentials();
+  const [customUrl, setCustomUrl] = useState<string>(creds.url);
+  const [customKey, setCustomKey] = useState<string>(creds.key);
+  const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
+  const [copiedSql, setCopiedSql] = useState<boolean>(false);
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
   const textPrimary = darkMode ? 'text-white' : 'text-[#0B1F3A]';
   const textMuted = darkMode ? 'text-white/60' : 'text-[#0B1F3A]/60';
 
-  const handleAddMember = (e: React.FormEvent) => {
+  const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmail || !newName) return;
 
@@ -53,8 +74,50 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
     };
 
     setMembers([...members, newMember]);
+    
+    // Save to Supabase (or local fallback)
+    const res = await saveTeamMemberToSupabase({
+      name: newName,
+      email: newEmail,
+      role: newRole,
+      status: 'Activo',
+      avatar_url: newMember.avatar,
+      operations_count: 0
+    });
+
+    if (res.mode === 'supabase') {
+      setMemberSaveStatus('¡Miembro guardado en la tabla team_members de Supabase!');
+    } else {
+      setMemberSaveStatus('Guardado localmente. (Configura Supabase en la pestaña 4 para sincronizar)');
+    }
+    setTimeout(() => setMemberSaveStatus(null), 4000);
+
     setNewName('');
     setNewEmail('');
+  };
+
+  const handleSaveSupabaseConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customUrl || !customKey) return;
+    setSupabaseCredentials(customUrl, customKey);
+    setConfigSuccessMsg('¡Credenciales de Supabase guardadas y cliente conectado!');
+    setTimeout(() => setConfigSuccessMsg(null), 4000);
+  };
+
+  const handleResetSupabaseConfig = () => {
+    clearSupabaseCredentials();
+    setCustomUrl('');
+    setCustomKey('');
+    setConfigSuccessMsg('Credenciales locales restablecidas.');
+    setTimeout(() => setConfigSuccessMsg(null), 3000);
+  };
+
+  const handleCopySql = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 3000);
+    }
   };
 
   return (
@@ -86,6 +149,7 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
           { id: 'equipo', label: '1. Equipo & Permisos', icon: Users },
           { id: 'planes', label: '2. Planes de Suscripción', icon: Sparkles },
           { id: 'facturacion', label: '3. Facturación SUNAT', icon: CreditCard },
+          { id: 'supabase', label: '4. Supabase DB & API', icon: Database },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -108,9 +172,20 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
 
       {/* TAB 1: GESTIÓN DE EQUIPO */}
       {activeTab === 'equipo' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Members List (8 Cols) */}
-          <div className={`lg:col-span-8 rounded-3xl p-6 border shadow-sm space-y-4 ${containerBg}`}>
+        <div className="space-y-6">
+          {memberSaveStatus && (
+            <div className="p-4 rounded-2xl bg-[#E6FCF7] border border-[#00E5B0] text-[#008F6B] flex items-center justify-between font-mono text-xs">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{memberSaveStatus}</span>
+              </div>
+              <button onClick={() => setMemberSaveStatus(null)} className="underline">Cerrar</button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Members List (8 Cols) */}
+            <div className={`lg:col-span-8 rounded-3xl p-6 border shadow-sm space-y-4 ${containerBg}`}>
             <div className="flex items-center justify-between border-b border-[#0B1F3A]/10 pb-4">
               <div>
                 <h3 className={`font-heading font-bold text-lg ${textPrimary}`}>
@@ -249,6 +324,7 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
               </div>
             </form>
           </div>
+        </div>
         </div>
       )}
 
@@ -454,6 +530,178 @@ export const Screen9Settings: React.FC<Screen9Props> = ({ onNavigate, darkMode }
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: SUPABASE & BASE DE DATOS */}
+      {activeTab === 'supabase' && (
+        <div className="space-y-8">
+          {/* Notifications */}
+          {configSuccessMsg && (
+            <div className="p-4 rounded-2xl bg-[#E6FCF7] border border-[#00E5B0] text-[#008F6B] flex items-center justify-between font-mono text-xs">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{configSuccessMsg}</span>
+              </div>
+              <button onClick={() => setConfigSuccessMsg(null)} className="underline">Cerrar</button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Supabase Connection Form (7 Cols) */}
+            <div className={`lg:col-span-7 rounded-3xl p-6 border shadow-sm space-y-6 ${containerBg}`}>
+              <div className="flex items-center justify-between border-b border-[#0B1F3A]/10 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#3ECF8E]/20 border border-[#3ECF8E]/40 flex items-center justify-center text-[#3ECF8E]">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className={`font-heading font-bold text-lg ${textPrimary}`}>
+                      Conexión a Supabase Cloud
+                    </h3>
+                    <p className={`text-xs ${textMuted}`}>
+                      Base de datos PostgreSQL para sincronización de despachos y partidas en tiempo real.
+                    </p>
+                  </div>
+                </div>
+
+                <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold border ${
+                  creds.isConfigured
+                    ? 'bg-[#E6FCF7] text-[#008F6B] border-[#00E5B0]'
+                    : 'bg-amber-100 text-amber-800 border-amber-300'
+                }`}>
+                  {creds.isConfigured ? '● Conectado' : '○ Modo Local Fallback'}
+                </span>
+              </div>
+
+              {/* Status Details */}
+              <div className={`p-4 rounded-2xl border space-y-2 text-xs font-mono ${cardBg}`}>
+                <div className="flex justify-between items-center py-1 border-b border-black/5 dark:border-white/5">
+                  <span className={textMuted}>Estado del Backend:</span>
+                  <span className="font-bold text-[#008F6B]">
+                    {creds.isConfigured ? 'Conexión Supabase Activa' : 'Persistencia Local (LocalStorage)'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1 border-b border-black/5 dark:border-white/5">
+                  <span className={textMuted}>Origen de Configuración:</span>
+                  <span className="font-bold">
+                    {creds.source === 'env' ? '.env.example / Variables de Entorno' : creds.source === 'storage' ? 'Configuración en Vivo (Browser)' : 'No configurado'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center py-1">
+                  <span className={textMuted}>URL Registrada:</span>
+                  <span className="font-bold truncate max-w-[220px]">
+                    {creds.url || 'No especificada'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Form to update Supabase credentials */}
+              <form onSubmit={handleSaveSupabaseConfig} className="space-y-4">
+                <div>
+                  <label className={`block text-xs font-mono uppercase font-bold mb-1.5 ${textMuted}`}>
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://xxxxxxxxxxxxxxxxxxxx.supabase.co"
+                    value={customUrl}
+                    onChange={(e) => setCustomUrl(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-xl text-xs font-mono border focus:ring-2 focus:ring-[#00E5B0] ${
+                      darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
+                    }`}
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1 font-mono">
+                    Encuéntralo en tu Supabase Dashboard &gt; Project Settings &gt; API &gt; Project URL
+                  </p>
+                </div>
+
+                <div>
+                  <label className={`block text-xs font-mono uppercase font-bold mb-1.5 ${textMuted}`}>
+                    Supabase Anon Public Key (API Key)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    value={customKey}
+                    onChange={(e) => setCustomKey(e.target.value)}
+                    className={`w-full px-4 py-2.5 rounded-xl text-xs font-mono border focus:ring-2 focus:ring-[#00E5B0] ${
+                      darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
+                    }`}
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1 font-mono">
+                    Encuéntralo en tu Supabase Dashboard &gt; Project Settings &gt; API &gt; Project API keys (anon public)
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-md transition-all flex items-center justify-center gap-2"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>GUARDAR Y CONECTAR</span>
+                  </button>
+
+                  {creds.isConfigured && (
+                    <button
+                      type="button"
+                      onClick={handleResetSupabaseConfig}
+                      className="py-2.5 px-4 rounded-xl border border-red-300 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 font-mono text-xs font-bold transition-all"
+                    >
+                      Desconectar
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            {/* SQL Script & Schema Reference (5 Cols) */}
+            <div className={`lg:col-span-5 rounded-3xl p-6 border shadow-sm space-y-4 ${containerBg}`}>
+              <div className="flex items-center justify-between border-b border-[#0B1F3A]/10 pb-3">
+                <div>
+                  <h4 className={`font-heading font-bold text-sm ${textPrimary}`}>
+                    Script SQL para Tablas
+                  </h4>
+                  <p className={`text-[11px] ${textMuted}`}>
+                    Copia y ejecuta en el SQL Editor de Supabase
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleCopySql}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-mono text-xs font-bold border transition-all ${
+                    copiedSql 
+                      ? 'bg-[#00E5B0] text-[#0B1F3A] border-[#00E5B0]' 
+                      : `${cardBg} ${textPrimary} hover:border-[#00E5B0]`
+                  }`}
+                >
+                  {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedSql ? '¡Copiado!' : 'Copiar SQL'}</span>
+                </button>
+              </div>
+
+              {/* SQL preview */}
+              <div className="relative">
+                <pre className="p-3.5 rounded-2xl bg-[#050C16] text-[#00E5B0] font-mono text-[11px] leading-relaxed overflow-x-auto max-h-80 border border-white/10 select-all">
+                  {SUPABASE_SQL_SCHEMA}
+                </pre>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-[#3ECF8E]/10 border border-[#3ECF8E]/30 space-y-1.5 text-xs font-mono">
+                <div className="font-bold text-[#008F6B] dark:text-[#3ECF8E] flex items-center gap-1.5">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Pasos para inicializar en Supabase:</span>
+                </div>
+                <ol className="list-decimal list-inside text-gray-500 dark:text-gray-300 text-[11px] space-y-1">
+                  <li>Ingresa a <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="underline font-bold text-[#008F6B]">supabase.com/dashboard</a></li>
+                  <li>Ve a <strong>SQL Editor</strong> &gt; <strong>New query</strong></li>
+                  <li>Pega el código SQL y presiona <strong>Run</strong></li>
+                  <li>¡Listo! Las tablas y formularios quedan vinculados.</li>
+                </ol>
+              </div>
             </div>
           </div>
         </div>

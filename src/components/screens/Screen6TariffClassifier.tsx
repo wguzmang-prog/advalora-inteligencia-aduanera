@@ -12,10 +12,12 @@ import {
   ChevronRight,
   Filter,
   ShieldAlert,
-  Percent
+  Percent,
+  Database
 } from 'lucide-react';
 import { ScreenId, TariffItem } from '../../types';
 import { MOCK_TARIFF_ITEMS } from '../../data/mockData';
+import { saveClassificationToSupabase, getSupabaseCredentials } from '../../lib/supabase';
 
 interface Screen6Props {
   onNavigate: (screen: ScreenId, itemId?: string) => void;
@@ -31,11 +33,34 @@ export const Screen6TariffClassifier: React.FC<Screen6Props> = ({
   const [items, setItems] = useState<TariffItem[]>(MOCK_TARIFF_ITEMS);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'validado' | 'en_revision' | 'observado'>('all');
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState<boolean>(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
   const textPrimary = darkMode ? 'text-white' : 'text-[#0B1F3A]';
   const textMuted = darkMode ? 'text-white/60' : 'text-[#0B1F3A]/60';
+
+  const handleSyncWithSupabase = async () => {
+    setIsSyncingSupabase(true);
+    let successCount = 0;
+    for (const item of items) {
+      await saveClassificationToSupabase({
+        reference_code: item.code,
+        commercial_description: item.commercialDescription,
+        hs_code: item.suggestedNandina,
+        confidence_score: item.confidence,
+        tariff_rate_adv: item.adValoremRate,
+        igv_rate: 16.0,
+        ipm_rate: 2.0,
+        restrictions: item.restrictedGood ? item.restrictedEntity : undefined
+      });
+      successCount++;
+    }
+    setIsSyncingSupabase(false);
+    setSyncStatusMsg(`¡${successCount} partidas NANDINA sincronizadas exitosamente con Supabase!`);
+    setTimeout(() => setSyncStatusMsg(null), 4000);
+  };
 
   const filteredItems = items.filter(item => {
     const matchesSearch = 
@@ -69,7 +94,17 @@ export const Screen6TariffClassifier: React.FC<Screen6Props> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            id="sync-classifications-supabase"
+            onClick={handleSyncWithSupabase}
+            disabled={isSyncingSupabase}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#00E5B0] bg-[#00E5B0]/10 hover:bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] font-mono text-xs font-bold transition-all disabled:opacity-50"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span>{isSyncingSupabase ? 'SINCRONIZANDO...' : 'SINCRONIZAR CON SUPABASE'}</span>
+          </button>
+
           <button
             onClick={() => onNavigate('tariff-detail')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold shadow-sm"
@@ -79,6 +114,17 @@ export const Screen6TariffClassifier: React.FC<Screen6Props> = ({
           </button>
         </div>
       </div>
+
+      {/* Sync Status Banner */}
+      {syncStatusMsg && (
+        <div className="mb-6 p-4 rounded-2xl bg-[#E6FCF7] border border-[#00E5B0] text-[#008F6B] flex items-center justify-between font-mono text-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            <span>{syncStatusMsg}</span>
+          </div>
+          <button onClick={() => setSyncStatusMsg(null)} className="underline">Cerrar</button>
+        </div>
+      )}
 
       {/* Summary KPI Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">

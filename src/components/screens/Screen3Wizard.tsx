@@ -15,7 +15,13 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { ScreenId, DocumentScan } from '../../types';
-import { MOCK_DOCUMENTS } from '../../data/mockData';
+import { MOCK_DOCUMENTS, CURRENT_OPERATION } from '../../data/mockData';
+import { 
+  saveCustomsOperationToSupabase, 
+  getSupabaseCredentials,
+  DbCustomsOperation 
+} from '../../lib/supabase';
+import { Database, CheckCircle, CloudUpload } from 'lucide-react';
 
 interface Screen3Props {
   onNavigate: (screen: ScreenId) => void;
@@ -27,9 +33,74 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
   const [customs, setCustoms] = useState<string>('118');
   const [incoterm, setIncoterm] = useState<string>('CIF');
   const [transportMode, setTransportMode] = useState<'Marítimo' | 'Aéreo'>('Marítimo');
+  const [importerRuc, setImporterRuc] = useState<string>('20554921098');
+  const [importerName, setImporterName] = useState<string>('TechImports Perú S.A.C.');
+  const [referenceNumber, setReferenceNumber] = useState<string>('ADV-2024-0892');
+  const [cifUsd, setCifUsd] = useState<number>(153550);
+  
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [progress, setProgress] = useState<number>(100);
   const [currentStepNote, setCurrentStepNote] = useState<string>('5 documentos procesados con éxito por el modelo de IA');
+
+  // Supabase Sync States
+  const [isSavingSupabase, setIsSavingSupabase] = useState<boolean>(false);
+  const [supabaseSyncResult, setSupabaseSyncResult] = useState<{ saved: boolean; mode: 'supabase' | 'local'; message: string } | null>(null);
+  const { isConfigured: hasSupabaseConfig, source: supabaseSource } = getSupabaseCredentials();
+
+  const handleSaveToSupabase = async (proceedNext: boolean = false) => {
+    setIsSavingSupabase(true);
+    setSupabaseSyncResult(null);
+
+    const customsName = customs === '118' 
+      ? 'Intendencia de Aduana Marítima del Callao' 
+      : customs === '235'
+      ? 'Intendencia de Aduana Aérea del Callao'
+      : 'Intendencia de Aduana de Paita';
+
+    const operationPayload: DbCustomsOperation = {
+      reference_number: referenceNumber,
+      regime: regime,
+      transport_mode: transportMode,
+      customs_code: customs,
+      customs_name: customsName,
+      importer_ruc: importerRuc,
+      importer_name: importerName,
+      incoterm: incoterm,
+      cif_usd: cifUsd,
+      documents_count: MOCK_DOCUMENTS.length,
+      critical_issues_count: 2,
+      status: 'En Observación',
+      metadata: {
+        last_updated_by: 'Liquidador Callao',
+        source: 'Wizard Creación Pre-DAM'
+      }
+    };
+
+    const res = await saveCustomsOperationToSupabase(operationPayload);
+    setIsSavingSupabase(false);
+
+    if (res.mode === 'supabase') {
+      setSupabaseSyncResult({
+        saved: true,
+        mode: 'supabase',
+        message: '¡Operación guardada exitosamente en la tabla customs_operations de Supabase!'
+      });
+    } else {
+      setSupabaseSyncResult({
+        saved: true,
+        mode: 'local',
+        message: res.error 
+          ? `Almacenado localmente (${res.error}). Puedes configurar tus claves en Ajustes.`
+          : 'Guardado localmente. Agrega tus credenciales Supabase en Ajustes para sincronización en la nube.'
+      });
+    }
+
+    if (proceedNext) {
+      setTimeout(() => {
+        onNavigate('consistency-matrix');
+      }, 600);
+    }
+  };
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
@@ -63,16 +134,29 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#00E5B0]/20 text-[#008F6B] border border-[#00E5B0]/40">
               PANTALLA 3 DE 9
             </span>
-            <h1 className={`text-2xl sm:text-3xl font-bold font-heading ${textPrimary}`}>
+
+            {/* Supabase Status Pill */}
+            <div className={`flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-mono font-semibold border ${
+              hasSupabaseConfig 
+                ? 'bg-[#E6FCF7] text-[#008F6B] border-[#00E5B0]/40' 
+                : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700/50'
+            }`}>
+              <Database className="w-3.5 h-3.5" />
+              <span>
+                {hasSupabaseConfig ? 'Supabase Conectado' : 'Supabase (Modo Local Activo)'}
+              </span>
+            </div>
+
+            <h1 className={`text-2xl sm:text-3xl font-bold font-heading w-full ${textPrimary} mt-1`}>
               Wizard de Creación: Nueva Declaración
             </h1>
           </div>
           <p className={`text-sm ${textMuted} mt-1`}>
-            Configura los metadatos del despacho y sube el legajo documental para análisis por IA.
+            Configura los metadatos del despacho y sincroniza el legajo documental con Supabase.
           </p>
         </div>
 
@@ -85,6 +169,31 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
           </button>
         </div>
       </div>
+
+      {/* Supabase Sync Notification Banner */}
+      {supabaseSyncResult && (
+        <div className={`mb-6 p-4 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+          supabaseSyncResult.mode === 'supabase'
+            ? 'bg-[#E6FCF7] border-[#00E5B0] text-[#008F6B]'
+            : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200'
+        }`}>
+          <div className="flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 shrink-0" />
+            <div className="text-xs font-mono">
+              <span className="font-bold">
+                {supabaseSyncResult.mode === 'supabase' ? 'Sincronizado con Supabase Cloud: ' : 'Almacenamiento Local: '}
+              </span>
+              <span>{supabaseSyncResult.message}</span>
+            </div>
+          </div>
+          <button 
+            onClick={() => setSupabaseSyncResult(null)}
+            className="text-xs font-mono underline hover:opacity-75"
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Form: Operation Metadata (5 Cols) */}
@@ -176,15 +285,46 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
             {/* Importer Info */}
             <div>
               <label className={`block text-xs font-mono uppercase font-bold mb-1.5 ${textMuted}`}>
-                Importador (RUC en Perú)
+                Importador (RUC y Razón Social)
               </label>
-              <input
-                type="text"
-                defaultValue="20554921098 - TechImports Perú S.A.C."
-                className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono border ${
-                  darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
-                }`}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  value={importerRuc}
+                  onChange={(e) => setImporterRuc(e.target.value)}
+                  placeholder="20554921098"
+                  className={`px-3.5 py-2.5 rounded-xl text-xs font-mono border ${
+                    darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
+                  }`}
+                />
+                <input
+                  type="text"
+                  value={importerName}
+                  onChange={(e) => setImporterName(e.target.value)}
+                  placeholder="TechImports Perú S.A.C."
+                  className={`sm:col-span-2 px-3.5 py-2.5 rounded-xl text-xs font-mono border ${
+                    darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
+                  }`}
+                />
+              </div>
+            </div>
+
+            {/* CIF Value */}
+            <div>
+              <label className={`block text-xs font-mono uppercase font-bold mb-1.5 ${textMuted}`}>
+                Valor CIF Estimado (USD)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-2.5 text-xs font-mono text-gray-400">$</span>
+                <input
+                  type="number"
+                  value={cifUsd}
+                  onChange={(e) => setCifUsd(Number(e.target.value) || 0)}
+                  className={`w-full pl-8 pr-3.5 py-2.5 rounded-xl text-xs font-mono border ${
+                    darkMode ? 'bg-[#071324] border-[#18335E] text-white' : 'bg-white border-[#0B1F3A]/20'
+                  }`}
+                />
+              </div>
             </div>
 
             {/* Incoterm */}
@@ -338,7 +478,7 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
               <span>Verificación previa a transmisión teledespacho</span>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <button
                 id="view-extracted-data-btn"
                 onClick={() => onNavigate('extraction')}
@@ -346,12 +486,24 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
               >
                 VER EXTRACCIÓN OCR
               </button>
+
+              <button
+                id="save-supabase-btn"
+                onClick={() => handleSaveToSupabase(false)}
+                disabled={isSavingSupabase}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#00E5B0] bg-[#00E5B0]/10 hover:bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] font-mono text-xs font-bold transition-all disabled:opacity-50"
+              >
+                <Database className="w-4 h-4" />
+                <span>{isSavingSupabase ? 'GUARDANDO...' : 'GUARDAR EN SUPABASE'}</span>
+              </button>
+
               <button
                 id="wizard-proceed-matrix"
-                onClick={() => onNavigate('consistency-matrix')}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-md shadow-[#00E5B0]/20"
+                onClick={() => handleSaveToSupabase(true)}
+                disabled={isSavingSupabase}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-md shadow-[#00E5B0]/20 transition-all disabled:opacity-50"
               >
-                <span>IR A MATRIZ DE CONSISTENCIA</span>
+                <span>GUARDAR E IR A MATRIZ</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
