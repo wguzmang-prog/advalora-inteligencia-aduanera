@@ -46,7 +46,13 @@ export default function App() {
       if (found) setSelectedTariffItem(found);
     }
     setCurrentScreen(screen);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      document.body.scrollTop = 0;
+      document.documentElement.scrollTop = 0;
+    } catch {
+      // ignore
+    }
   };
 
   return (
@@ -63,7 +69,7 @@ export default function App() {
       />
 
       {/* Main View Container */}
-      <main className="pb-20">
+      <main className="pb-32 sm:pb-40">
         {currentScreen === 'login-onboarding' && (
           <Screen1LoginOnboarding
             onCompleteOnboarding={(target) => handleNavigate(target || 'dashboard')}

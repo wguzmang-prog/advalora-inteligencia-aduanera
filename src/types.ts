@@ -96,6 +96,7 @@ export interface DeclarationOperation {
   projectedChannel: 'Verde' | 'Naranja' | 'Rojo';
   projectedRiskScore: number; // 0 to 100 (lower is better)
   documentsCount: number;
+  documents?: DocumentScan[];
   criticalIssuesCount: number;
   warningIssuesCount: number;
   createdAt: string;

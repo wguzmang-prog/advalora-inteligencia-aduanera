@@ -18,7 +18,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { ScreenId, ExtractedField } from '../../types';
-import { MOCK_EXTRACTED_FIELDS, MOCK_DOCUMENTS } from '../../data/mockData';
+import { MOCK_EXTRACTED_FIELDS, MOCK_DOCUMENTS, CURRENT_OPERATION } from '../../data/mockData';
 
 interface Screen4Props {
   onNavigate: (screen: ScreenId) => void;
@@ -173,8 +173,8 @@ export const Screen4DataExtraction: React.FC<Screen4Props> = ({ onNavigate, dark
               <div className="grid grid-cols-2 gap-4 pb-4 border-b text-[10px]">
                 <div>
                   <span className="font-bold uppercase text-gray-500 block">CONSIGNEE / BUYER:</span>
-                  <div className="font-bold text-[#0B1F3A] mt-0.5">TECHIMPORTS PERÚ S.A.C.</div>
-                  <div>RUC: 20554921098</div>
+                  <div className="font-bold text-[#0B1F3A] mt-0.5">{CURRENT_OPERATION.importerName || 'TECHIMPORTS PERÚ S.A.C.'}</div>
+                  <div>RUC: {CURRENT_OPERATION.importerRuc || '20554921098'}</div>
                   <div>Calle Las Camelias 490, San Isidro, Lima - Perú</div>
                 </div>
                 <div>

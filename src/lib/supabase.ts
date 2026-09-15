@@ -140,12 +140,21 @@ export interface DbClassificationRecord {
  * 1. Inserts or saves a Customs Operation (Wizard Form)
  */
 export async function saveCustomsOperationToSupabase(op: DbCustomsOperation): Promise<{ success: boolean; data?: any; error?: string; mode: 'supabase' | 'local' }> {
+  // Always guarantee local persistence first
+  saveToLocalStorageList('advalora_local_operations', op);
+
   const supabase = getSupabaseClient();
 
-  // If Supabase is configured, save in database
+  // If Supabase is configured, attempt save in database with 3.5s timeout safety
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
+        setTimeout(() => {
+          resolve({ data: null, error: { message: 'Tiempo de respuesta agotado (Supabase timeout 3.5s). Operación resguardada en caché local.' } });
+        }, 3500);
+      });
+
+      const upsertPromise = supabase
         .from('customs_operations')
         .upsert({
           reference_number: op.reference_number,
@@ -165,23 +174,51 @@ export async function saveCustomsOperationToSupabase(op: DbCustomsOperation): Pr
         }, { onConflict: 'reference_number' })
         .select();
 
+      const result = await Promise.race([upsertPromise, timeoutPromise]) as any;
+      let error = result.error;
+      let data = result.data;
+
+      // If upsert failed due to missing ON CONFLICT constraint, attempt direct insert
+      if (error && (error.message?.includes('ON CONFLICT') || error.message?.includes('constraint'))) {
+        try {
+          const insertRes = await supabase
+            .from('customs_operations')
+            .insert({
+              reference_number: `${op.reference_number}-${Date.now().toString().slice(-4)}`,
+              regime: op.regime,
+              transport_mode: op.transport_mode,
+              customs_code: op.customs_code,
+              customs_name: op.customs_name,
+              importer_ruc: op.importer_ruc,
+              importer_name: op.importer_name,
+              incoterm: op.incoterm,
+              cif_usd: op.cif_usd,
+              documents_count: op.documents_count,
+              critical_issues_count: op.critical_issues_count,
+              status: op.status,
+              metadata: op.metadata || {},
+              updated_at: new Date().toISOString()
+            })
+            .select();
+          error = insertRes.error;
+          data = insertRes.data;
+        } catch {
+          // ignore
+        }
+      }
+
       if (error) {
-        console.warn('Supabase insert warning:', error.message);
-        // Fallback save in localStorage so no data is ever lost
-        saveToLocalStorageList('advalora_local_operations', op);
+        console.warn('Supabase customs operation warning:', error.message);
         return { success: true, error: error.message, mode: 'local' };
       }
 
       return { success: true, data, mode: 'supabase' };
     } catch (err: any) {
       console.error('Supabase exception:', err);
-      saveToLocalStorageList('advalora_local_operations', op);
-      return { success: true, error: err.message, mode: 'local' };
+      return { success: true, error: err?.message || 'Error de conexión', mode: 'local' };
     }
   }
 
-  // Local storage fallback
-  saveToLocalStorageList('advalora_local_operations', op);
   return { success: true, mode: 'local' };
 }
 
@@ -327,14 +364,24 @@ export async function getTeamMembersFromSupabase(): Promise<{ data: DbTeamMember
 }
 
 /**
- * Helper to persist items safely in LocalStorage
+ * Helper to persist items safely in LocalStorage with deduplication
  */
 function saveToLocalStorageList(key: string, item: any) {
   if (typeof window === 'undefined') return;
   try {
-    const existing = JSON.parse(localStorage.getItem(key) || '[]');
-    existing.unshift({ ...item, saved_at: new Date().toISOString() });
-    localStorage.setItem(key, JSON.stringify(existing.slice(0, 50)));
+    const raw = localStorage.getItem(key);
+    const existing = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(existing)) {
+      localStorage.setItem(key, JSON.stringify([{ ...item, saved_at: new Date().toISOString() }]));
+      return;
+    }
+    // Deduplicate if item has reference_number, id, or email
+    const idKey = item.reference_number || item.id || item.email || item.reference_code;
+    const filtered = idKey 
+      ? existing.filter((ex: any) => (ex.reference_number || ex.id || ex.email || ex.reference_code) !== idKey)
+      : existing;
+    filtered.unshift({ ...item, saved_at: new Date().toISOString() });
+    localStorage.setItem(key, JSON.stringify(filtered.slice(0, 50)));
   } catch (e) {
     console.error('LocalStorage error:', e);
   }

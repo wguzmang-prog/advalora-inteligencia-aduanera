@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   AlertOctagon, 
   AlertTriangle, 
@@ -17,11 +17,18 @@ import {
   ExternalLink,
   ChevronRight,
   ShieldCheck,
-  Undo2
+  Undo2,
+  RefreshCw,
+  Cpu,
+  Database,
+  FileSearch,
+  CheckCircle,
+  FileSpreadsheet,
+  Layers
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { ScreenId, InconsistencyFinding, Severity } from '../../types';
-import { MOCK_INCONSISTENCIES, CURRENT_OPERATION } from '../../data/mockData';
+import { ScreenId, InconsistencyFinding, Severity, DeclarationOperation } from '../../types';
+import { MOCK_INCONSISTENCIES, CURRENT_OPERATION, getActiveOperation } from '../../data/mockData';
 import { SeverityBadge, CustomsSeal, SunatChannelPill } from '../common/CustomsDecorations';
 
 interface Screen5Props {
@@ -35,11 +42,101 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
   darkMode,
   onUpdateBlockersCount 
 }) => {
-  const [findings, setFindings] = useState<InconsistencyFinding[]>(MOCK_INCONSISTENCIES);
+  // Read saved active operation from localStorage or CURRENT_OPERATION
+  const [operation, setOperation] = useState<DeclarationOperation>(() => getActiveOperation());
+
+  // Keep in sync with latest local storage updates
+  useEffect(() => {
+    const activeOp = getActiveOperation();
+    setOperation(activeOp);
+    setFindings(buildFindings(activeOp));
+  }, []);
+
+  // Generate dynamic findings reflecting the current active operation
+  const buildFindings = (op: DeclarationOperation): InconsistencyFinding[] => {
+    const refClean = (op.referenceNumber || 'ADV-2024-0892').replace('ADV-', '');
+    const impName = op.importerName || 'TechImports Perú S.A.C.';
+    const impRuc = op.importerRuc || '20554921098';
+    const firstWord = impName.split(' ')[0] || 'TechImports';
+    const incotermVal = op.incoterm || 'CIF';
+    const cifFormatted = (op.totalCifUsd || 153550).toLocaleString('en-US');
+
+    return MOCK_INCONSISTENCIES.map(f => {
+      if (f.id === 'inc-01') {
+        return {
+          ...f,
+          affectedDocuments: [
+            {
+              docType: 'Packing List',
+              docName: `PL-2024-${refClean}_${firstWord}.pdf`,
+              quotedValue: 'Total Gross Weight: 1,420.50 KGS (85 Palletized Cartons)',
+              location: 'Página 2, Cuadro resumen de pesos finales'
+            },
+            {
+              docType: 'Bill of Lading',
+              docName: `MAEU98231019_BL_${refClean}.pdf`,
+              quotedValue: 'Gross Cargo Weight: 1,380.00 KGS (Declared by Shipper)',
+              location: 'Página 1, Casilla 14 (Gross Weight)'
+            }
+          ]
+        };
+      }
+      if (f.id === 'inc-02') {
+        return {
+          ...f,
+          title: `Conflicto entre Incoterm ${incotermVal} pactado y Cláusula de Flete`,
+          description: `La Factura Comercial indica condición de venta ${incotermVal} por USD ${cifFormatted}, mientras que el B/L marítimo estipula flete por cobrar en destino (Freight Collect).`,
+          affectedDocuments: [
+            {
+              docType: 'Factura Comercial',
+              docName: `INV-2024-SZ_${firstWord}.pdf`,
+              quotedValue: `Terms of Delivery: ${incotermVal} CALLAO (Valor Total Declarado USD ${cifFormatted})`,
+              location: 'Página 1, Encabezado comercial y desglose final'
+            },
+            {
+              docType: 'Bill of Lading',
+              docName: `MAEU98231019_BL_${refClean}.pdf`,
+              quotedValue: 'Freight & Charges: FREIGHT COLLECT (Payable at destination by consignee)',
+              location: 'Página 1, Casilla 17 (Freight Payment Terms)'
+            }
+          ]
+        };
+      }
+      if (f.id === 'inc-03') {
+        return {
+          ...f,
+          description: `El Certificado de Origen omitió la extensión societaria en la razón social de ${impName}.`,
+          affectedDocuments: [
+            {
+              docType: 'Certificado de Origen',
+              docName: `COO_China_Peru_FTA_${refClean}.pdf`,
+              quotedValue: `Consignee: ${impName.toUpperCase().replace(' S.A.C.', ' S.A.').replace(' SAC', ' SA')} - RUC ${impRuc} (Calle Las Camelias 490)`,
+              location: 'Página 1, Casilla 2 (Consignee Name & Address)'
+            },
+            {
+              docType: 'Factura Comercial',
+              docName: `INV-2024-SZ_${firstWord}.pdf`,
+              quotedValue: `Buyer: ${impName.toUpperCase()} - RUC ${impRuc}`,
+              location: 'Página 1, Casilla Comprador'
+            }
+          ]
+        };
+      }
+      return f;
+    });
+  };
+
+  const [findings, setFindings] = useState<InconsistencyFinding[]>(() => buildFindings(operation));
   const [severityFilter, setSeverityFilter] = useState<'all' | 'bloqueante' | 'advertencia' | 'validado'>('all');
   const [resolvingFinding, setResolvingFinding] = useState<InconsistencyFinding | null>(null);
   const [resolutionChoice, setResolutionChoice] = useState<string>('option-1');
   const [customJustification, setCustomJustification] = useState<string>('');
+
+  // Consistency analysis state
+  const [isAuditing, setIsAuditing] = useState<boolean>(false);
+  const [auditProgress, setAuditProgress] = useState<number>(100);
+  const [auditStep, setAuditStep] = useState<string>('Legajo documental auditado con IA');
+  const [auditNotice, setAuditNotice] = useState<{ show: boolean; message: string } | null>(null);
 
   const containerBg = darkMode ? 'bg-[#0B1F3A] border-[#18335E]' : 'bg-white border-[#0B1F3A]/10';
   const cardBg = darkMode ? 'bg-[#132B4F] border-[#1E4378]' : 'bg-[#F4F7FB] border-[#0B1F3A]/10';
@@ -57,6 +154,44 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
     if (severityFilter === 'validado') return f.severity === 'validado' || f.resolutionStatus === 'resuelto';
     return true;
   });
+
+  // Handler for requesting consistency analysis
+  const handleRequestConsistency = () => {
+    const currentOp = getActiveOperation();
+    setOperation(currentOp);
+    setIsAuditing(true);
+    setAuditProgress(15);
+    setAuditStep(`1/5: Vinculando ${currentOp.documentsCount || 5} documentos del importador ${currentOp.importerName}...`);
+
+    setTimeout(() => {
+      setAuditProgress(40);
+      setAuditStep('2/5: Cotejando Factura Comercial vs Packing List (Pesos y Códigos)...');
+    }, 400);
+
+    setTimeout(() => {
+      setAuditProgress(68);
+      setAuditStep(`3/5: Evaluando condición Incoterm ${currentOp.incoterm || 'CIF'} vs Flete Marítimo B/L...`);
+    }, 850);
+
+    setTimeout(() => {
+      setAuditProgress(88);
+      setAuditStep(`4/5: Cruzando RUC ${currentOp.importerRuc} con Certificado de Origen TLC...`);
+    }, 1300);
+
+    setTimeout(() => {
+      setAuditProgress(100);
+      setIsAuditing(false);
+      setAuditStep('5/5: Auditoría IA de consistencia completada');
+      setFindings(buildFindings(currentOp));
+      setAuditNotice({
+        show: true,
+        message: `¡Consistencia auditada con IA para ${currentOp.importerName}! Se cotejaron los documentos guardados y se identificaron 2 observaciones bloqueantes para subsanar.`
+      });
+      setTimeout(() => {
+        setAuditNotice(null);
+      }, 6000);
+    }, 1800);
+  };
 
   const handleResolve = (findingId: string, choiceNote: string) => {
     const updated = findings.map(f => {
@@ -107,17 +242,17 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* STAR SCREEN BADGE HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#FF5A5F]/20 text-[#FF5A5F] border border-[#FF5A5F]/40 flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-[#FFD600]" />
               PANTALLA 5 • CORAZÓN DEL PRODUCTO
             </span>
             <span className="text-xs font-mono text-[#008F6B] font-bold">
-              Despacho: {CURRENT_OPERATION.referenceNumber}
+              Despacho: {operation.referenceNumber}
             </span>
           </div>
           <h1 className={`text-2xl sm:text-3xl font-bold font-heading ${textPrimary} mt-1`}>
@@ -128,14 +263,26 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
           </p>
         </div>
 
-        {/* Quick Nav Actions */}
-        <div className="flex items-center gap-3">
+        {/* Quick Nav & Main Action Actions */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            id="request-consistency-header-btn"
+            type="button"
+            onClick={handleRequestConsistency}
+            disabled={isAuditing}
+            className="cursor-pointer flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#00E5B0] bg-[#00E5B0]/15 hover:bg-[#00E5B0]/25 text-[#008F6B] dark:text-[#00E5B0] font-mono text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+          >
+            <Cpu className={`w-4 h-4 ${isAuditing ? 'animate-spin' : ''}`} />
+            <span>{isAuditing ? 'ANALIZANDO...' : 'SOLICITAR CONSISTENCIA IA'}</span>
+          </button>
+
           <button
             onClick={() => onNavigate('classifier')}
             className="px-4 py-2.5 rounded-xl border border-[#0B1F3A]/20 dark:border-white/20 font-mono text-xs font-bold hover:bg-white/10"
           >
             CLASIFICADOR NANDINA →
           </button>
+
           <button
             onClick={() => onNavigate('report')}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-mono text-xs font-bold tracking-wider shadow-md transition-all ${
@@ -150,8 +297,121 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
         </div>
       </div>
 
+      {/* EXPEDIENTE GUARDADO SUMMARY CARD */}
+      <div className={`p-5 rounded-3xl border shadow-sm ${containerBg}`}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#0B1F3A]/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#00E5B0]/15 border border-[#00E5B0]/30 flex items-center justify-center text-[#008F6B] dark:text-[#00E5B0]">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#008F6B] dark:text-[#00E5B0]">
+                  Expediente Guardado & Sincronizado
+                </span>
+                <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
+                  <CheckCircle className="w-3 h-3" />
+                  Listo para Consistencia
+                </span>
+              </div>
+              <h2 className={`text-base sm:text-lg font-bold font-heading ${textPrimary}`}>
+                {operation.importerName}
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              id="request-consistency-main-btn"
+              type="button"
+              onClick={handleRequestConsistency}
+              disabled={isAuditing}
+              className="cursor-pointer flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-md shadow-[#00E5B0]/25 active:scale-95 transition-all disabled:opacity-50"
+            >
+              <Cpu className={`w-4 h-4 ${isAuditing ? 'animate-spin' : ''}`} />
+              <span>{isAuditing ? 'EJECUTANDO ANÁLISIS IA...' : 'SOLICITAR CONSISTENCIA IA'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Operation Grid Details */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-4 text-xs font-mono">
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">N° Despacho</span>
+            <span className="font-bold text-[#008F6B] dark:text-[#00E5B0]">{operation.referenceNumber}</span>
+          </div>
+
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">RUC Importador</span>
+            <span className="font-bold">{operation.importerRuc}</span>
+          </div>
+
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">Valor CIF Declarado</span>
+            <span className="font-bold text-[#0B1F3A] dark:text-white">
+              ${Number(operation.totalCifUsd || 153550).toLocaleString('en-US', { minimumFractionDigits: 2 })} USD
+            </span>
+          </div>
+
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">Incoterm</span>
+            <span className="font-bold text-amber-600 dark:text-amber-400">{operation.incoterm || 'CIF'}</span>
+          </div>
+
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">Aduana</span>
+            <span className="font-bold truncate block" title={operation.customsCode}>
+              {operation.customsCode?.split(' - ')[0] || '118 Callao'}
+            </span>
+          </div>
+
+          <div className={`p-3 rounded-2xl ${cardBg}`}>
+            <span className="text-[10px] uppercase text-gray-400 block mb-0.5">Legajo Documental</span>
+            <span className="font-bold text-[#008F6B] dark:text-[#00E5B0]">
+              {operation.documentsCount || 5} Documentos
+            </span>
+          </div>
+        </div>
+
+        {/* Live Consistency Scanning Bar if Auditing */}
+        {isAuditing && (
+          <div className="mt-4 p-4 rounded-2xl bg-[#00E5B0]/10 border border-[#00E5B0]/30 space-y-2 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="font-bold text-[#008F6B] dark:text-[#00E5B0] flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                {auditStep}
+              </span>
+              <span className="font-bold text-[#0B1F3A] dark:text-white">{auditProgress}%</span>
+            </div>
+            <div className="w-full bg-black/10 dark:bg-white/10 rounded-full h-2 overflow-hidden">
+              <div 
+                className="bg-[#00E5B0] h-full rounded-full transition-all duration-300"
+                style={{ width: `${auditProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Audit Notice Toast */}
+        {auditNotice && (
+          <div className="mt-4 p-3.5 rounded-2xl bg-[#E6FCF7] dark:bg-[#00E5B0]/15 border border-[#00E5B0] text-[#008F6B] dark:text-[#00E5B0] text-xs font-mono flex items-center justify-between gap-3 animate-in fade-in duration-200">
+            <div className="flex items-center gap-2 font-bold">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              <span>{auditNotice.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAuditNotice(null)}
+              className="text-[11px] underline hover:opacity-75 cursor-pointer"
+            >
+              Cerrar
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* SUNAT HEALTH BANNER & SEVERITY COUNTERS */}
-      <div className={`p-6 rounded-3xl border mb-8 relative overflow-hidden shadow-sm ${containerBg}`}>
+      <div className={`p-6 rounded-3xl border relative overflow-hidden shadow-sm ${containerBg}`}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
           {/* Status Indicator */}
           <div>
@@ -253,7 +513,7 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
       </div>
 
       {/* FILTER TABS STRIP */}
-      <div className="flex items-center justify-between gap-4 mb-6">
+      <div className="flex items-center justify-between gap-4 mb-2">
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {[
             { id: 'all', label: 'Todos los Hallazgos', count: findings.length },
@@ -292,7 +552,7 @@ export const Screen5ConsistencyMatrix: React.FC<Screen5Props> = ({
 
           return (
             <div
-              key={finding.id}
+              key={`finding-${finding.id}`}
               className={`rounded-3xl border p-6 transition-all relative overflow-hidden ${
                 isResolved
                   ? `${containerBg} opacity-90 border-[#00E5B0]/40`

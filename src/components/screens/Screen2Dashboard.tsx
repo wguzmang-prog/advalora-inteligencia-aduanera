@@ -43,42 +43,50 @@ export const Screen2Dashboard: React.FC<Screen2Props> = ({ onNavigate, darkMode 
       if (res.data && res.data.length > 0) {
         setDataSource(res.source);
         // Map any newly inserted Supabase operations into DeclarationOperation format
-        const converted: DeclarationOperation[] = res.data.map((dbOp) => ({
-          id: dbOp.id || dbOp.reference_number,
-          referenceNumber: dbOp.reference_number,
-          customsCode: `${dbOp.customs_code} - ${dbOp.customs_name}`,
-          regime: `${dbOp.regime} - Importación para el Consumo`,
-          importerRuc: dbOp.importer_ruc,
-          importerName: dbOp.importer_name,
-          supplierName: dbOp.metadata?.supplierName || 'Global Logistics Co. Ltd.',
-          supplierCountry: dbOp.metadata?.supplierCountry || 'China',
-          transportMode: (dbOp.transport_mode === 'Aéreo' ? 'Aéreo' : 'Marítimo'),
-          vesselOrFlight: dbOp.metadata?.vessel || 'CMA CGM CALLAO V.049W',
-          billOfLading: dbOp.metadata?.bl || 'BL-' + dbOp.reference_number,
-          incoterm: (dbOp.incoterm as any) || 'CIF',
-          totalFobUsd: (dbOp.cif_usd || 100000) * 0.88,
-          freightUsd: (dbOp.cif_usd || 100000) * 0.10,
-          insuranceUsd: (dbOp.cif_usd || 100000) * 0.02,
-          totalCifUsd: dbOp.cif_usd || 0,
-          status: dbOp.status === 'Auditado' ? 'Validada' : dbOp.status === 'En Observación' ? 'Observada' : (dbOp.status as any) || 'Borrador',
-          projectedChannel: (dbOp.critical_issues_count || 0) > 0 ? 'Rojo' : 'Verde',
-          projectedRiskScore: (dbOp.critical_issues_count || 0) > 0 ? 84 : 12,
-          documentsCount: dbOp.documents_count || 5,
-          criticalIssuesCount: dbOp.critical_issues_count || 0,
-          warningIssuesCount: 1,
-          createdAt: dbOp.created_at || new Date().toISOString(),
-          lastUpdated: dbOp.created_at || 'Hace instantes',
-          liquidator: {
-            name: dbOp.metadata?.last_updated_by || 'Carlos Mendoza',
-            role: 'Liquidador Aduanero Callao',
-            avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120&auto=format&fit=crop&q=80'
-          }
-        }));
+        const seenRefs = new Set<string>();
+        const uniqueConverted: DeclarationOperation[] = [];
+
+        res.data.forEach((dbOp, index) => {
+          const ref = dbOp.reference_number || `OP-${index}`;
+          if (seenRefs.has(ref)) return;
+          seenRefs.add(ref);
+
+          uniqueConverted.push({
+            id: dbOp.id || `op-db-${ref}`,
+            referenceNumber: ref,
+            customsCode: `${dbOp.customs_code} - ${dbOp.customs_name}`,
+            regime: `${dbOp.regime} - Importación para el Consumo`,
+            importerRuc: dbOp.importer_ruc,
+            importerName: dbOp.importer_name,
+            supplierName: dbOp.metadata?.supplierName || 'Global Logistics Co. Ltd.',
+            supplierCountry: dbOp.metadata?.supplierCountry || 'China',
+            transportMode: (dbOp.transport_mode === 'Aéreo' ? 'Aéreo' : 'Marítimo'),
+            vesselOrFlight: dbOp.metadata?.vessel || 'CMA CGM CALLAO V.049W',
+            billOfLading: dbOp.metadata?.bl || 'BL-' + ref,
+            incoterm: (dbOp.incoterm as any) || 'CIF',
+            totalFobUsd: (dbOp.cif_usd || 100000) * 0.88,
+            freightUsd: (dbOp.cif_usd || 100000) * 0.10,
+            insuranceUsd: (dbOp.cif_usd || 100000) * 0.02,
+            totalCifUsd: dbOp.cif_usd || 0,
+            status: dbOp.status === 'Auditado' ? 'Validada' : dbOp.status === 'En Observación' ? 'Observada' : (dbOp.status as any) || 'Borrador',
+            projectedChannel: (dbOp.critical_issues_count || 0) > 0 ? 'Rojo' : 'Verde',
+            projectedRiskScore: (dbOp.critical_issues_count || 0) > 0 ? 84 : 12,
+            documentsCount: dbOp.documents_count || 5,
+            criticalIssuesCount: dbOp.critical_issues_count || 0,
+            warningIssuesCount: 1,
+            createdAt: dbOp.created_at || new Date().toISOString(),
+            lastUpdated: dbOp.created_at || 'Hace instantes',
+            liquidator: {
+              name: dbOp.metadata?.last_updated_by || 'Carlos Mendoza',
+              role: 'Liquidador Aduanero Callao',
+              avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=120&auto=format&fit=crop&q=80'
+            }
+          });
+        });
 
         // Combine with existing mock operations avoiding duplicate referenceNumbers
-        const existingRefs = new Set(converted.map(c => c.referenceNumber));
-        const nonDuplicateMock = MOCK_OPERATIONS.filter(m => !existingRefs.has(m.referenceNumber));
-        setAllOperations([...converted, ...nonDuplicateMock]);
+        const nonDuplicateMock = MOCK_OPERATIONS.filter(m => !seenRefs.has(m.referenceNumber));
+        setAllOperations([...uniqueConverted, ...nonDuplicateMock]);
       }
     }
     loadOperations();
@@ -290,12 +298,12 @@ export const Screen2Dashboard: React.FC<Screen2Props> = ({ onNavigate, darkMode 
 
       {/* Operations Cards Grid */}
       <div className="space-y-4">
-        {filteredOperations.map((op) => {
-          const isSelectedPilot = op.id === 'op-0892';
+        {filteredOperations.map((op, opIndex) => {
+          const isSelectedPilot = op.id === 'op-0892' || op.referenceNumber === 'ADV-2024-0892';
 
           return (
             <div
-              key={op.id}
+              key={`dashboard-op-${op.id || op.referenceNumber}-${opIndex}`}
               className={`rounded-2xl border p-5 transition-all relative overflow-hidden ${
                 isSelectedPilot 
                   ? `${containerBg} ring-2 ring-[#FF5A5F]/60 shadow-md` 

@@ -17,7 +17,7 @@ import {
   Plus
 } from 'lucide-react';
 import { ScreenId, DocumentScan } from '../../types';
-import { MOCK_DOCUMENTS, CURRENT_OPERATION } from '../../data/mockData';
+import { MOCK_DOCUMENTS, CURRENT_OPERATION, updateCurrentOperation } from '../../data/mockData';
 import { 
   saveCustomsOperationToSupabase, 
   getSupabaseCredentials,
@@ -31,14 +31,18 @@ interface Screen3Props {
 }
 
 export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) => {
-  const [regime, setRegime] = useState<string>('10');
-  const [customs, setCustoms] = useState<string>('118');
-  const [incoterm, setIncoterm] = useState<string>('CIF');
-  const [transportMode, setTransportMode] = useState<'Marítimo' | 'Aéreo'>('Marítimo');
-  const [importerRuc, setImporterRuc] = useState<string>('20554921098');
-  const [importerName, setImporterName] = useState<string>('TechImports Perú S.A.C.');
-  const [referenceNumber, setReferenceNumber] = useState<string>('ADV-2024-0892');
-  const [cifUsd, setCifUsd] = useState<number>(153550);
+  const [regime, setRegime] = useState<string>(() => CURRENT_OPERATION.regime?.startsWith('40') ? '40' : '10');
+  const [customs, setCustoms] = useState<string>(() => {
+    if (CURRENT_OPERATION.customsCode?.includes('235')) return '235';
+    if (CURRENT_OPERATION.customsCode?.includes('019')) return '019';
+    return '118';
+  });
+  const [incoterm, setIncoterm] = useState<string>(() => CURRENT_OPERATION.incoterm || 'CIF');
+  const [transportMode, setTransportMode] = useState<'Marítimo' | 'Aéreo'>(() => CURRENT_OPERATION.transportMode === 'Aéreo' ? 'Aéreo' : 'Marítimo');
+  const [importerRuc, setImporterRuc] = useState<string>(() => CURRENT_OPERATION.importerRuc || '20554921098');
+  const [importerName, setImporterName] = useState<string>(() => CURRENT_OPERATION.importerName || 'TechImports Perú S.A.C.');
+  const [referenceNumber, setReferenceNumber] = useState<string>(() => CURRENT_OPERATION.referenceNumber || 'ADV-2024-0892');
+  const [cifUsd, setCifUsd] = useState<number>(() => CURRENT_OPERATION.totalCifUsd || 153550);
   
   // Document state and file handling
   const [documents, setDocuments] = useState<DocumentScan[]>(MOCK_DOCUMENTS);
@@ -52,8 +56,159 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
 
   // Supabase Sync States
   const [isSavingSupabase, setIsSavingSupabase] = useState<boolean>(false);
+  const [justSaved, setJustSaved] = useState<boolean>(false);
+  const [isNavigatingToMatrix, setIsNavigatingToMatrix] = useState<boolean>(false);
   const [supabaseSyncResult, setSupabaseSyncResult] = useState<{ saved: boolean; mode: 'supabase' | 'local'; message: string } | null>(null);
   const { isConfigured: hasSupabaseConfig, source: supabaseSource } = getSupabaseCredentials();
+
+  // Synchronize current operation in memory and local storage
+  const syncActiveOperation = () => {
+    const customsName = customs === '118' 
+      ? 'Intendencia de Aduana Marítima del Callao' 
+      : customs === '235'
+      ? 'Intendencia de Aduana Aérea del Callao'
+      : 'Intendencia de Aduana de Paita';
+
+    updateCurrentOperation({
+      referenceNumber: referenceNumber,
+      regime: regime === '10' ? '10 - Importación para el Consumo' : '40 - Exportación Definitiva',
+      transportMode: transportMode,
+      customsCode: `${customs} - ${customsName}`,
+      importerRuc: importerRuc,
+      importerName: importerName,
+      incoterm: incoterm,
+      totalCifUsd: cifUsd,
+      documentsCount: documents.length,
+      documents: documents
+    });
+  };
+
+  const handleGoToExtraction = () => {
+    syncActiveOperation();
+    onNavigate('extraction');
+  };
+
+  const handleProceedToMatrix = () => {
+    setIsNavigatingToMatrix(true);
+    // 1. Immediately sync in-memory state and localStorage
+    syncActiveOperation();
+
+    const customsName = customs === '118' 
+      ? 'Intendencia de Aduana Marítima del Callao' 
+      : customs === '235'
+      ? 'Intendencia de Aduana Aérea del Callao'
+      : 'Intendencia de Aduana de Paita';
+
+    const operationPayload: DbCustomsOperation = {
+      reference_number: referenceNumber,
+      regime: regime,
+      transport_mode: transportMode,
+      customs_code: customs,
+      customs_name: customsName,
+      importer_ruc: importerRuc,
+      importer_name: importerName,
+      incoterm: incoterm,
+      cif_usd: cifUsd,
+      documents_count: documents.length,
+      critical_issues_count: 2,
+      status: 'En Observación',
+      metadata: {
+        last_updated_by: 'Liquidador Callao',
+        source: 'Wizard Creación Pre-DAM',
+        documents_list: documents.map(d => ({ name: d.name, type: d.type, fileName: d.fileName }))
+      }
+    };
+
+    // Save to local operations cache immediately
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('advalora_local_operations');
+        const list: DbCustomsOperation[] = stored ? JSON.parse(stored) : [];
+        if (Array.isArray(list)) {
+          const existingIdx = list.findIndex(op => op && op.reference_number === operationPayload.reference_number);
+          if (existingIdx >= 0) {
+            list[existingIdx] = operationPayload;
+          } else {
+            list.unshift(operationPayload);
+          }
+          localStorage.setItem('advalora_local_operations', JSON.stringify(list));
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // Save to Supabase in background (non-blocking)
+    saveCustomsOperationToSupabase(operationPayload).catch(err => {
+      console.warn('Background Supabase save notification:', err);
+    });
+
+    // Navigate smoothly to Screen 5 (Matriz de Consistencia) with quick feedback
+    setTimeout(() => {
+      onNavigate('consistency-matrix');
+    }, 200);
+  };
+
+  // Quick helper to attach a realistic sample document without needing OS dialog
+  const handleAddSampleDocument = () => {
+    const sampleOptions: DocumentScan[] = [
+      {
+        id: `doc-sample-${Date.now()}-1`,
+        name: `Factura Comercial Rectificada - ${importerName.split(' ')[0]}`,
+        type: 'Factura Comercial',
+        fileName: `INV-2024-RECT_${referenceNumber}.pdf`,
+        fileSize: '1.2 MB',
+        pages: 2,
+        status: 'validado',
+        confidence: 99.2,
+        extractedFieldsCount: 22,
+        matchedFieldsCount: 22,
+        mismatchCount: 0,
+        uploadDate: new Date().toLocaleDateString('es-PE')
+      },
+      {
+        id: `doc-sample-${Date.now()}-2`,
+        name: `Certificado de Origen TLC Form A`,
+        type: 'Certificado de Origen',
+        fileName: `COO_Peru_China_${referenceNumber}.pdf`,
+        fileSize: '950 KB',
+        pages: 1,
+        status: 'observado',
+        confidence: 97.4,
+        extractedFieldsCount: 16,
+        matchedFieldsCount: 15,
+        mismatchCount: 1,
+        uploadDate: new Date().toLocaleDateString('es-PE')
+      },
+      {
+        id: `doc-sample-${Date.now()}-3`,
+        name: `Tique de Balanza APM Terminals Callao`,
+        type: 'Packing List',
+        fileName: `TIQUE_BALANZA_APM_${referenceNumber}.pdf`,
+        fileSize: '420 KB',
+        pages: 1,
+        status: 'validado',
+        confidence: 99.8,
+        extractedFieldsCount: 8,
+        matchedFieldsCount: 8,
+        mismatchCount: 0,
+        uploadDate: new Date().toLocaleDateString('es-PE')
+      }
+    ];
+
+    const pick = sampleOptions[documents.length % sampleOptions.length];
+    const updated = [pick, ...documents];
+    setDocuments(updated);
+    setUploadFeedback(`¡Documento adjuntado con éxito: "${pick.name}"!`);
+    
+    // Sync immediately
+    updateCurrentOperation({
+      documentsCount: updated.length,
+      documents: updated
+    });
+
+    setTimeout(() => setUploadFeedback(null), 3500);
+  };
 
   // Helper to detect document type by filename
   const detectDocumentType = (fileName: string): DocumentScan['type'] => {
@@ -171,55 +326,72 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
   const handleSaveToSupabase = async (proceedNext: boolean = false) => {
     setIsSavingSupabase(true);
     setSupabaseSyncResult(null);
+    syncActiveOperation();
 
-    const customsName = customs === '118' 
-      ? 'Intendencia de Aduana Marítima del Callao' 
-      : customs === '235'
-      ? 'Intendencia de Aduana Aérea del Callao'
-      : 'Intendencia de Aduana de Paita';
+    try {
+      const customsName = customs === '118' 
+        ? 'Intendencia de Aduana Marítima del Callao' 
+        : customs === '235'
+        ? 'Intendencia de Aduana Aérea del Callao'
+        : 'Intendencia de Aduana de Paita';
 
-    const operationPayload: DbCustomsOperation = {
-      reference_number: referenceNumber,
-      regime: regime,
-      transport_mode: transportMode,
-      customs_code: customs,
-      customs_name: customsName,
-      importer_ruc: importerRuc,
-      importer_name: importerName,
-      incoterm: incoterm,
-      cif_usd: cifUsd,
-      documents_count: documents.length,
-      critical_issues_count: 2,
-      status: 'En Observación',
-      metadata: {
-        last_updated_by: 'Liquidador Callao',
-        source: 'Wizard Creación Pre-DAM'
+      const operationPayload: DbCustomsOperation = {
+        reference_number: referenceNumber,
+        regime: regime,
+        transport_mode: transportMode,
+        customs_code: customs,
+        customs_name: customsName,
+        importer_ruc: importerRuc,
+        importer_name: importerName,
+        incoterm: incoterm,
+        cif_usd: cifUsd,
+        documents_count: documents.length,
+        critical_issues_count: 2,
+        status: 'En Observación',
+        metadata: {
+          last_updated_by: 'Liquidador Callao',
+          source: 'Wizard Creación Pre-DAM'
+        }
+      };
+
+      const res = await saveCustomsOperationToSupabase(operationPayload);
+
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 3500);
+
+      if (res.mode === 'supabase' && !res.error) {
+        setSupabaseSyncResult({
+          saved: true,
+          mode: 'supabase',
+          message: '¡Operación guardada exitosamente en la tabla customs_operations de Supabase!'
+        });
+      } else {
+        setSupabaseSyncResult({
+          saved: true,
+          mode: 'local',
+          message: res.error 
+            ? `Operación resguardada localmente en caché (${res.error}).`
+            : 'Operación guardada en almacenamiento local seguro.'
+        });
       }
-    };
 
-    const res = await saveCustomsOperationToSupabase(operationPayload);
-    setIsSavingSupabase(false);
-
-    if (res.mode === 'supabase') {
-      setSupabaseSyncResult({
-        saved: true,
-        mode: 'supabase',
-        message: '¡Operación guardada exitosamente en la tabla customs_operations de Supabase!'
-      });
-    } else {
+      if (proceedNext) {
+        onNavigate('consistency-matrix');
+      }
+    } catch (err: any) {
+      console.error('Error saving customs operation:', err);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 3500);
       setSupabaseSyncResult({
         saved: true,
         mode: 'local',
-        message: res.error 
-          ? `Almacenado localmente (${res.error}). Puedes configurar tus claves en Ajustes.`
-          : 'Guardado localmente. Agrega tus credenciales Supabase en Ajustes para sincronización en la nube.'
+        message: 'Operación resguardada en almacenamiento local seguro.'
       });
-    }
-
-    if (proceedNext) {
-      setTimeout(() => {
+      if (proceedNext) {
         onNavigate('consistency-matrix');
-      }, 600);
+      }
+    } finally {
+      setIsSavingSupabase(false);
     }
   };
 
@@ -281,12 +453,31 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button
             onClick={() => onNavigate('dashboard')}
-            className={`px-4 py-2 rounded-xl text-xs font-mono font-bold ${cardBg} ${textMuted} hover:text-white`}
+            className={`cursor-pointer px-4 py-2 rounded-xl text-xs font-mono font-bold ${cardBg} ${textMuted} hover:text-white transition-colors`}
           >
             ← Cancelar
+          </button>
+          <button
+            id="wizard-top-proceed-matrix"
+            type="button"
+            onClick={handleProceedToMatrix}
+            disabled={isNavigatingToMatrix}
+            className="cursor-pointer flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-lg shadow-[#00E5B0]/25 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {isNavigatingToMatrix ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>GUARDANDO...</span>
+              </>
+            ) : (
+              <>
+                <span>GUARDAR E IR A MATRIZ</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -504,7 +695,7 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
             </button>
           </div>
 
-          {/* Hidden File Input */}
+          {/* File Input */}
           <input
             ref={fileInputRef}
             id="file-upload-input"
@@ -512,18 +703,18 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
             multiple
             accept=".pdf,.doc,.docx,.xls,.xlsx,application/pdf"
             onChange={handleFileInputChange}
-            className="hidden"
+            className="sr-only"
           />
 
-          {/* Drag and Drop Zone */}
-          <div 
+          {/* Drag and Drop Zone as clickable label */}
+          <label 
+            htmlFor="file-upload-input"
             id="document-dropzone"
-            onClick={() => fileInputRef.current?.click()}
             onDragOver={handleDragOver}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer select-none ${
+            className={`block border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer select-none ${
               isDragging 
                 ? 'border-[#00E5B0] bg-[#00E5B0]/20 scale-[1.01] shadow-lg shadow-[#00E5B0]/10 ring-2 ring-[#00E5B0]/50'
                 : 'border-[#00E5B0]/60 bg-[#00E5B0]/5 hover:bg-[#00E5B0]/10 hover:border-[#00E5B0]'
@@ -536,11 +727,25 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
             <p className={`text-xs ${textMuted} mt-1 max-w-md mx-auto`}>
               Soporta: Factura Comercial, Packing List, Bill of Lading / AWB, Certificado de Origen (TLC) y Swift Bancario en formato PDF.
             </p>
-            <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] border border-[#00E5B0]/30 hover:bg-[#00E5B0]/30 transition-colors">
-              <Plus className="w-3.5 h-3.5" />
-              <span>Examinar Archivos en tu Computadora</span>
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#00E5B0] text-[#0B1F3A] shadow-sm hover:bg-[#00B88C] transition-colors">
+                <Plus className="w-3.5 h-3.5" />
+                Examinar Archivos de tu PC
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleAddSampleDocument();
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] border border-[#00E5B0]/40 hover:bg-[#00E5B0]/30 transition-colors cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                + Adjuntar Documento de Prueba
+              </button>
             </div>
-          </div>
+          </label>
 
           {/* Upload Feedback Toast */}
           {uploadFeedback && (
@@ -582,9 +787,9 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
               <span>Estado OCR</span>
             </div>
 
-            {documents.map((doc) => (
+            {documents.map((doc, docIdx) => (
               <div
-                key={doc.id}
+                key={`wizard-doc-${doc.id || doc.fileName}-${docIdx}`}
                 className={`p-3 rounded-xl border flex items-center justify-between gap-3 ${cardBg} hover:border-[#00E5B0]/40 transition-colors group`}
               >
                 <div className="flex items-center gap-3 min-w-0">
@@ -643,40 +848,92 @@ export const Screen3Wizard: React.FC<Screen3Props> = ({ onNavigate, darkMode }) 
           </div>
 
           {/* Action Footer */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-[#0B1F3A]/10">
-            <div className="flex items-center gap-2 text-xs font-mono text-[#008F6B]">
-              <ShieldCheck className="w-4 h-4 text-[#00E5B0]" />
-              <span>Verificación previa a transmisión teledespacho</span>
-            </div>
+          <div className="space-y-3 pt-4 border-t border-[#0B1F3A]/10">
+            {/* Inline Feedback Banner right above the action buttons */}
+            {supabaseSyncResult && (
+              <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs font-mono transition-all ${
+                supabaseSyncResult.mode === 'supabase'
+                  ? 'bg-[#E6FCF7] border-[#00E5B0] text-[#008F6B] dark:bg-[#00E5B0]/15 dark:text-[#00E5B0]'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-200'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0 text-[#008F6B] dark:text-[#00E5B0]" />
+                  <span className="font-bold">
+                    {supabaseSyncResult.mode === 'supabase' ? 'Supabase Cloud: ' : 'Caché Seguro: '}
+                  </span>
+                  <span>{supabaseSyncResult.message}</span>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setSupabaseSyncResult(null)}
+                  className="underline hover:opacity-75 cursor-pointer text-[11px]"
+                >
+                  Entendido
+                </button>
+              </div>
+            )}
 
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                id="view-extracted-data-btn"
-                onClick={() => onNavigate('extraction')}
-                className="px-4 py-2.5 rounded-xl border border-[#0B1F3A]/20 dark:border-white/20 text-xs font-mono font-bold hover:bg-white/10"
-              >
-                VER EXTRACCIÓN OCR
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2 text-xs font-mono text-[#008F6B]">
+                <ShieldCheck className="w-4 h-4 text-[#00E5B0]" />
+                <span>Verificación previa a transmisión teledespacho</span>
+              </div>
 
-              <button
-                id="save-supabase-btn"
-                onClick={() => handleSaveToSupabase(false)}
-                disabled={isSavingSupabase}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#00E5B0] bg-[#00E5B0]/10 hover:bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0] font-mono text-xs font-bold transition-all disabled:opacity-50"
-              >
-                <Database className="w-4 h-4" />
-                <span>{isSavingSupabase ? 'GUARDANDO...' : 'GUARDAR EN SUPABASE'}</span>
-              </button>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  id="view-extracted-data-btn"
+                  type="button"
+                  onClick={handleGoToExtraction}
+                  className="cursor-pointer px-4 py-2.5 rounded-xl border border-[#0B1F3A]/20 dark:border-white/20 text-xs font-mono font-bold hover:bg-white/10 active:scale-95 transition-all text-[#0B1F3A] dark:text-white"
+                >
+                  VER EXTRACCIÓN OCR
+                </button>
 
-              <button
-                id="wizard-proceed-matrix"
-                onClick={() => handleSaveToSupabase(true)}
-                disabled={isSavingSupabase}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-md shadow-[#00E5B0]/20 transition-all disabled:opacity-50"
-              >
-                <span>GUARDAR E IR A MATRIZ</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+                <button
+                  id="save-supabase-btn"
+                  type="button"
+                  onClick={() => handleSaveToSupabase(false)}
+                  disabled={isSavingSupabase}
+                  className={`cursor-pointer flex items-center gap-2 px-4 py-2.5 rounded-xl border font-mono text-xs font-bold active:scale-95 transition-all disabled:opacity-50 ${
+                    justSaved
+                      ? 'border-[#00E5B0] bg-[#00E5B0] text-[#0B1F3A] shadow-md shadow-[#00E5B0]/30'
+                      : 'border-[#00E5B0] bg-[#00E5B0]/10 hover:bg-[#00E5B0]/20 text-[#008F6B] dark:text-[#00E5B0]'
+                  }`}
+                >
+                  {justSaved ? (
+                    <CheckCircle className="w-4 h-4" />
+                  ) : (
+                    <Database className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isSavingSupabase 
+                      ? 'GUARDANDO...' 
+                      : justSaved 
+                      ? '¡GUARDADO CON ÉXITO!' 
+                      : 'GUARDAR EN SUPABASE'}
+                  </span>
+                </button>
+
+                <button
+                  id="wizard-proceed-matrix"
+                  type="button"
+                  onClick={handleProceedToMatrix}
+                  disabled={isNavigatingToMatrix}
+                  className="cursor-pointer flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#00E5B0] text-[#0B1F3A] hover:bg-[#00B88C] font-mono text-xs font-bold tracking-wider shadow-lg shadow-[#00E5B0]/25 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isNavigatingToMatrix ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>GUARDANDO...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>GUARDAR E IR A MATRIZ</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -32,6 +32,51 @@ export const CURRENT_OPERATION: DeclarationOperation = {
   }
 };
 
+// Restore saved active operation from localStorage if available
+if (typeof window !== 'undefined') {
+  try {
+    const savedOp = localStorage.getItem('advalora_active_operation');
+    if (savedOp) {
+      const parsed = JSON.parse(savedOp);
+      Object.assign(CURRENT_OPERATION, parsed);
+    }
+  } catch (e) {
+    // Ignore JSON parse errors
+  }
+}
+
+/**
+ * Updates the globally active operation in memory and persists to localStorage
+ */
+export function updateCurrentOperation(updates: Partial<DeclarationOperation>) {
+  Object.assign(CURRENT_OPERATION, updates);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('advalora_active_operation', JSON.stringify(CURRENT_OPERATION));
+    } catch (e) {
+      // Ignore
+    }
+  }
+}
+
+/**
+ * Returns the freshest active operation, giving priority to localStorage
+ */
+export function getActiveOperation(): DeclarationOperation {
+  if (typeof window !== 'undefined') {
+    try {
+      const savedOp = localStorage.getItem('advalora_active_operation');
+      if (savedOp) {
+        const parsed = JSON.parse(savedOp);
+        return { ...CURRENT_OPERATION, ...parsed };
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+  return CURRENT_OPERATION;
+}
+
 export const MOCK_OPERATIONS: DeclarationOperation[] = [
   CURRENT_OPERATION,
   {
